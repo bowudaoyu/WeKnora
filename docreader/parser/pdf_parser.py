@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import statistics
+import threading
 
 from docreader.config import CONFIG
 from docreader.models.document import Document
@@ -29,6 +30,19 @@ from docreader.parser.base_parser import BaseParser
 from docreader.parser.concurrency import parser_worker_limit
 
 logger = logging.getLogger(__name__)
+
+
+# pdfium's C library keeps process-global state and is NOT thread-safe: when two
+# gRPC worker threads open/parse different PDFs at the same time they can corrupt
+# that state, after which EVERY subsequent PdfDocument() in the process fails
+# with "Data format error" until the process is restarted (observed in
+# production with a 4-worker gRPC server on batch uploads). Per-page rendering
+# already fans out across *processes* (see _render_scanned_pages); this lock
+# serialises the remaining in-thread pdfium work — document open plus per-page
+# text/raw access — across all concurrent requests. It is an RLock so
+# PDFParser.parse_into_text can fall back to PDFScannedParser within the same
+# thread without self-deadlocking.
+_PDFIUM_LOCK = threading.RLock()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -1306,7 +1320,9 @@ class PDFScannedParser(BaseParser):
         )
 
         try:
-            with parser_worker_limit("pdf_render", CONFIG.pdf_render_max_workers):
+            with _PDFIUM_LOCK, parser_worker_limit(
+                "pdf_render", CONFIG.pdf_render_max_workers
+            ):
                 pdf = pdfium.PdfDocument(content)
                 try:
                     page_count = len(pdf)
@@ -1357,17 +1373,21 @@ class PDFParser(BaseParser):
     """
 
     def parse_into_text(self, content: bytes) -> Document:
-        try:
-            return self._route(content)
-        except Exception:
-            logger.exception(
-                "PDFParser: per-page routing failed for %s; "
-                "falling back to full image rendering",
-                self.file_name,
-            )
-            return PDFScannedParser(
-                file_name=self.file_name, file_type=self.file_type
-            ).parse_into_text(content)
+        # Serialise all in-thread pdfium access across concurrent gRPC workers;
+        # the RLock lets the fallback re-enter from the same thread. See
+        # _PDFIUM_LOCK for the corruption this prevents.
+        with _PDFIUM_LOCK:
+            try:
+                return self._route(content)
+            except Exception:
+                logger.exception(
+                    "PDFParser: per-page routing failed for %s; "
+                    "falling back to full image rendering",
+                    self.file_name,
+                )
+                return PDFScannedParser(
+                    file_name=self.file_name, file_type=self.file_type
+                ).parse_into_text(content)
 
     def _route(self, content: bytes) -> Document:
         import pypdfium2 as pdfium
