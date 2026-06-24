@@ -480,6 +480,9 @@ export default {
     generatedQuestions: "생성된 질문",
     childChunk: "자식 청크",
     viewParentContext: "부모 컨텍스트 보기",
+    viewPageOcr: "페이지 OCR 텍스트",
+    noPageOcr: "이 페이지에서 인식된 텍스트가 없습니다",
+    pageOcrLoadFailed: "페이지 OCR 텍스트 로드 실패",
     parentContextLoadFailed: "부모 컨텍스트 로드 실패",
     confirmDeleteQuestion:
       "이 질문을 삭제하시겠습니까? 삭제 시 해당 벡터 인덱스도 함께 제거됩니다.",

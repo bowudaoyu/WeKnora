@@ -8,7 +8,7 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
+import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, getKnowledgeChunksByType, previewKnowledgeFile } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
@@ -971,6 +971,82 @@ const getParentContent = (item: any) => {
   return parentContextCache.value.get(item.parent_chunk_id) || '';
 };
 
+// 本页识别文字（OCR）展开：分块视图默认只拉 text 块，扫描件/图片的 OCR 文字在
+// image_ocr 子块里（parent_chunk_id 指向当前 text 页块）。这里按需一次性拉取本
+// 文档全部 image_ocr 块，按 parent_chunk_id 归并，挂到对应页块下展开查看。
+const ocrExpanded = ref<Set<number>>(new Set());
+const ocrByParent = ref<Map<string, string>>(new Map());
+const ocrLoadedForDoc = ref(false);
+const ocrLoading = ref(false);
+
+const isOcrExpanded = (index: number) => ocrExpanded.value.has(index);
+
+// 仅对“包含图片”的页块显示 OCR 入口（避免普通文本块出现无意义的开关）。
+const chunkHasImage = (item: any) => {
+  const c = item?.content;
+  return typeof c === 'string' && c.includes('![');
+};
+
+const ensureOcrLoaded = async () => {
+  if (ocrLoadedForDoc.value || ocrLoading.value) return;
+  const docId = props.details?.id;
+  if (!docId) return;
+  ocrLoading.value = true;
+  try {
+    const pageSize = 100;
+    const maxPages = 50; // 安全上限，避免极端文档拉爆
+    const grouped = new Map<string, any[]>();
+    for (let p = 1; p <= maxPages; p++) {
+      const result: any = await getKnowledgeChunksByType(docId, p, pageSize, 'image_ocr');
+      const list: any[] = (result && result.data) || [];
+      for (const ch of list) {
+        const pid = ch.parent_chunk_id;
+        if (!pid) continue;
+        if (!grouped.has(pid)) grouped.set(pid, []);
+        grouped.get(pid)!.push(ch);
+      }
+      if (list.length < pageSize) break;
+    }
+    const merged = new Map<string, string>();
+    for (const [pid, list] of grouped) {
+      list.sort(
+        (a, b) => (a.chunk_index ?? a.start_at ?? 0) - (b.chunk_index ?? b.start_at ?? 0)
+      );
+      merged.set(pid, list.map((c) => c.content || '').filter(Boolean).join('\n\n'));
+    }
+    ocrByParent.value = merged;
+    ocrLoadedForDoc.value = true;
+  } catch (err) {
+    MessagePlugin.error(t('knowledgeBase.pageOcrLoadFailed'));
+  } finally {
+    ocrLoading.value = false;
+  }
+};
+
+const toggleOcr = async (item: any, index: number) => {
+  if (ocrExpanded.value.has(index)) {
+    ocrExpanded.value.delete(index);
+    ocrExpanded.value = new Set(ocrExpanded.value);
+    return;
+  }
+  await ensureOcrLoaded();
+  ocrExpanded.value.add(index);
+  ocrExpanded.value = new Set(ocrExpanded.value);
+  await runMarkdownPostRenderPipeline();
+};
+
+const getOcrContent = (item: any) => {
+  return ocrByParent.value.get(item?.id) || '';
+};
+
+// 切换文档时重置 OCR 状态，避免串库串文档。
+watch(() => props.details?.id, () => {
+  ocrExpanded.value = new Set();
+  ocrByParent.value = new Map();
+  ocrLoadedForDoc.value = false;
+  ocrLoading.value = false;
+});
+
 const summaryExpanded = ref(false);
 const summaryRef = ref<HTMLElement>();
 const summaryOverflow = ref(false);
@@ -1236,6 +1312,23 @@ const handleDetailsScroll = () => {
               </div>
               <div v-show="isParentExpanded(index)" class="parent-context-content">
                 <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
+              </div>
+            </div>
+
+            <!-- 本页识别文字（OCR）展开：扫描件/图片页块的 OCR 文字在 image_ocr 子块 -->
+            <div v-if="chunkHasImage(chunk.original)" class="parent-context-section">
+              <div class="parent-context-toggle" @click="toggleOcr(chunk.original, index)">
+                <t-icon v-if="!(ocrLoading && !ocrLoadedForDoc)"
+                  :name="isOcrExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
+                <t-loading v-else size="small" style="width: 14px; height: 14px;" />
+                <span>{{ $t('knowledgeBase.viewPageOcr') }}</span>
+              </div>
+              <div v-show="isOcrExpanded(index)" class="parent-context-content">
+                <div v-if="getOcrContent(chunk.original)" class="md-content"
+                  v-html="processMarkdown(getOcrContent(chunk.original))"></div>
+                <div v-else-if="ocrLoadedForDoc" class="no_content">
+                  {{ $t('knowledgeBase.noPageOcr') }}
+                </div>
               </div>
             </div>
 
