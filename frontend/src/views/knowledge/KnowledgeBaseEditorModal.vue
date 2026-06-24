@@ -669,7 +669,9 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       language: ''
     },
     nodeExtractConfig: {
-      enabled: false,
+      // 默认开启实体关系提取（知识图谱）：配合 indexingStrategy.graphEnabled 一起为 true，
+      // IsGraphEnabled() 才成立、GraphRAG 综述与图谱召回才会构建。
+      enabled: true,
       text: '',
       tags: [] as string[],
       nodes: [] as Array<{
@@ -694,8 +696,11 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     indexingStrategy: {
       vectorEnabled: true,
       keywordEnabled: true,
-      wikiEnabled: false,
-      graphEnabled: false,
+      // 默认勾选 Wiki 知识库索引（基本信息页右侧卡片）。
+      wikiEnabled: true,
+      // 默认开启知识图谱索引；与 nodeExtractConfig.enabled 同为 true 才会真正建图谱
+      // （IsGraphEnabled() = graphEnabled && extractConfig.enabled）。
+      graphEnabled: true,
     },
     // Vector-store binding. Empty string means "use the env-configured
     // store"; create mode defaults to that, edit mode loads the
