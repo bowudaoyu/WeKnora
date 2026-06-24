@@ -293,6 +293,20 @@ export function getKnowledgeDetailsCon(id: string, page: number) {
   return get(`/api/v1/chunks/${id}?page=${page}&page_size=25`);
 }
 
+// 按 chunk_type 拉取分块（如 image_ocr / image_caption）。
+// 后端 ListKnowledgeChunks 默认只返回 text 块，扫描件/图片的 OCR 文字在 image_ocr 子块里，
+// 需要显式传 chunk_type 才能取到。
+export function getKnowledgeChunksByType(
+  id: string,
+  page: number,
+  pageSize: number,
+  chunkType: string
+) {
+  return get(
+    `/api/v1/chunks/${id}?page=${page}&page_size=${pageSize}&chunk_type=${encodeURIComponent(chunkType)}`
+  );
+}
+
 // Get chunk by chunk_id only (new endpoint - to be added to backend)
 export function getChunkByIdOnly(chunkId: string) {
   return get(`/api/v1/chunks/by-id/${chunkId}`);
