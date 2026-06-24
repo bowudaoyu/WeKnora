@@ -696,8 +696,9 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     indexingStrategy: {
       vectorEnabled: true,
       keywordEnabled: true,
-      // 默认勾选 Wiki 知识库索引（基本信息页右侧卡片）。
-      wikiEnabled: true,
+      // Wiki 索引默认不勾：guide-agent 检索不消费 Wiki 页面，开它只会给每篇文档多跑一遍
+      // LLM 合成、徒增成本。需要 Wiki 浏览页时再在建库时手动勾选。
+      wikiEnabled: false,
       // 默认开启知识图谱索引；与 nodeExtractConfig.enabled 同为 true 才会真正建图谱
       // （IsGraphEnabled() = graphEnabled && extractConfig.enabled）。
       graphEnabled: true,
