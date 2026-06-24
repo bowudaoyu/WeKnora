@@ -669,9 +669,11 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       language: ''
     },
     nodeExtractConfig: {
-      // 默认开启实体关系提取（知识图谱）：配合 indexingStrategy.graphEnabled 一起为 true，
-      // IsGraphEnabled() 才成立、GraphRAG 综述与图谱召回才会构建。
-      enabled: true,
+      // 默认关闭实体关系提取：后端 validateExtractConfig 在 enabled=true 时强制要求
+      // text/tags/nodes/relations 全部非空，否则建库/保存直接报 "text cannot be empty"。
+      // 而新建弹窗默认不带示例，故默认开会让建库流程整体失败。要用 GraphRAG 时，
+      // 在「知识图谱」面板手动开此开关并点「默认示例」(或自填示例后点开始提取)即可。
+      enabled: false,
       text: '',
       tags: [] as string[],
       nodes: [] as Array<{
