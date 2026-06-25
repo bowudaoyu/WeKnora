@@ -111,7 +111,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 grpc_health_probe
+# 安装 grpc_health_probe（离线优先：packages/ 下有则用本地，否则在线下载）
+COPY packages/ /app/packages/
 ARG TARGETARCH
 # 兼容 BuildKit 和传统构建：如果 TARGETARCH 为空，使用 uname 检测
 RUN if [ -z "$TARGETARCH" ]; then \
@@ -132,7 +133,13 @@ RUN if [ -z "$TARGETARCH" ]; then \
         "arm") ARCH="arm" ;; \
         *) echo "Unsupported architecture: $TARGETARCH" && exit 1 ;; \
     esac && \
-    wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${ARCH} && \
+    if [ -f "/app/packages/grpc_health_probe-linux-${ARCH}" ]; then \
+        echo "发现本地 grpc_health_probe，离线安装" && \
+        cp "/app/packages/grpc_health_probe-linux-${ARCH}" /bin/grpc_health_probe; \
+    else \
+        echo "未发现本地 grpc_health_probe，在线下载" && \
+        wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${ARCH}; \
+    fi && \
     chmod +x /bin/grpc_health_probe
 
 # 从构建阶段复制已安装的依赖和生成的代码
