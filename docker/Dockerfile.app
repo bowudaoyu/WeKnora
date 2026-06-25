@@ -28,7 +28,8 @@ RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd/download cmd/download
-RUN go run cmd/download/duckdb/duckdb.go
+# duckdb 扩展预载：弱网/偶发 wedge 时加超时兜底，超时则降级（保证 /root/.duckdb 存在，后续 COPY 不报错）
+RUN timeout 300 go run cmd/download/duckdb/duckdb.go || { echo "[warn] duckdb 扩展预载超时/失败，降级，运行时按需安装"; mkdir -p /root/.duckdb; }
 COPY . .
 
 # Get version and commit info for build injection
