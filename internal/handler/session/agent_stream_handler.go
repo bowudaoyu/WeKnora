@@ -346,9 +346,14 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 			} else if refMap, ok := ref.(map[string]interface{}); ok {
 				// Parse from map if needed
 				searchResult := &types.SearchResult{
-					ID:                   getString(refMap, "id"),
-					Content:              getString(refMap, "content"),
-					Score:                getFloat64(refMap, "score"),
+					ID:      getString(refMap, "id"),
+					Content: getString(refMap, "content"),
+					Score:   getFloat64(refMap, "score"),
+					// 保留召回来源标签：references 事件经 EventBus 序列化后，data.References
+					// 退化为 []map（上面的直接类型断言失败），这里按字段重建 SearchResult。
+					// 漏掉 match_type 会让所有引用默认成 0(embedding)，下游(如 guide-agent
+					// 豁免图谱召回的相关性闸门、前端图谱徽标)再也认不出知识图谱来源(6)/关系(5)。
+					MatchType:            types.MatchType(int(getFloat64(refMap, "match_type"))),
 					KnowledgeID:          getString(refMap, "knowledge_id"),
 					KnowledgeTitle:       getString(refMap, "knowledge_title"),
 					ChunkIndex:           int(getFloat64(refMap, "chunk_index")),
