@@ -155,6 +155,11 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	// Merge results from both searches
 	chatManage.SearchResult = append(chunkCM.SearchResult, entityCM.SearchResult...)
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
+	// 回灌实体子图(typed 关系)：search_entity 在克隆体 entityCM 上设置 GraphResult，
+	// 不回灌父 chatManage 则下游(emitGraphEvent)拿不到、graph 事件发不出。
+	if entityCM.GraphResult != nil {
+		chatManage.GraphResult = entityCM.GraphResult
+	}
 
 	for name, err := range errs {
 		logger.Warnf(ctx, "[SearchParallel] %s error: %v", name, err.Err)
