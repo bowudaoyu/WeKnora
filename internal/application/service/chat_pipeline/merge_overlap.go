@@ -67,6 +67,13 @@ func (p *PluginMerge) mergeOverlappingChunks(
 		if chunks[i].Score > lastChunk.Score {
 			lastChunk.Score = chunks[i].Score
 		}
+
+		// 保留图谱/关系来源标签：被吸收的实体关联 chunk 携带知识图谱的“隐藏故事线”，
+		// 合并后整条已含其内容，必须保留更强的来源标签——否则下游（如豁免图谱召回的
+		// 相关性闸门）无法识别它来自图谱、可能误删。只提升 provenance 标签、不改内容选择。
+		if matchTypeProvenanceRank(chunks[i].MatchType) > matchTypeProvenanceRank(lastChunk.MatchType) {
+			lastChunk.MatchType = chunks[i].MatchType
+		}
 	}
 
 	// Sort merged chunks by score (highest first)
@@ -75,6 +82,22 @@ func (p *PluginMerge) mergeOverlappingChunks(
 	})
 
 	return merged
+}
+
+// matchTypeProvenanceRank ranks how "irreplaceable" a chunk's recall source is,
+// so merge can keep the stronger provenance label when absorbing one chunk into
+// another. Graph (entity-traversal) > RelationChunk (precomputed relation) >
+// everything else (vector/keyword/nearby/parent…). Only used to upgrade the
+// MatchType label on merge; it never changes which content survives.
+func matchTypeProvenanceRank(mt types.MatchType) int {
+	switch mt {
+	case types.MatchTypeGraph:
+		return 2
+	case types.MatchTypeRelationChunk:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // mergeImageInfo merges ImageInfo from source into target, deduplicating by URL.
