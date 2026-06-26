@@ -115,10 +115,15 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 			for _, ref := range refs {
 				if refMap, ok := ref.(map[string]interface{}); ok {
 					sr := &types.SearchResult{
-						ID:                   getString(refMap, "id"),
-						Content:              getString(refMap, "content"),
-						KnowledgeID:          getString(refMap, "knowledge_id"),
-						ChunkIndex:           int(getFloat64(refMap, "chunk_index")),
+						ID:          getString(refMap, "id"),
+						Content:     getString(refMap, "content"),
+						KnowledgeID: getString(refMap, "knowledge_id"),
+						ChunkIndex:  int(getFloat64(refMap, "chunk_index")),
+						// 保留召回来源标签：references 经 streamManager(Redis) 序列化后退化为
+						// []map，这里按字段重建 SearchResult。漏掉 match_type 会让客户端拿到的
+						// knowledge_references 全部默认成 0(embedding)——知识图谱召回(6)/关系(5)
+						// 在 knowledge-chat 看不到的真正根因就在此处（与 merge 阶段无关）。
+						MatchType:            types.MatchType(int(getFloat64(refMap, "match_type"))),
 						KnowledgeTitle:       getString(refMap, "knowledge_title"),
 						StartAt:              int(getFloat64(refMap, "start_at")),
 						EndAt:                int(getFloat64(refMap, "end_at")),
