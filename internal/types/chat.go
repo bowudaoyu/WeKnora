@@ -102,6 +102,8 @@ const (
 	ResponseTypeToolApprovalRequired ResponseType = "tool_approval_required"
 	// ToolApprovalResolved: user approved/rejected (or timeout); informational for UI replay
 	ResponseTypeToolApprovalResolved ResponseType = "tool_approval_resolved"
+	// Graph: entity subgraph (typed relations) for downstream graph-reasoning
+	ResponseTypeGraph ResponseType = "graph"
 )
 
 // StreamResponse stream response

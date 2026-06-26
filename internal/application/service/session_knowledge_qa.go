@@ -582,6 +582,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 		// already closed the stream, so the frontend only saw citations on refresh.
 		if eventType == types.CHAT_COMPLETION_STREAM {
 			emitKnowledgeReferencesEvent(ctx, chatManage)
+			emitGraphEvent(ctx, chatManage)
 		}
 		err := s.eventManager.Trigger(stageCtx, eventType, chatManage)
 		if understandProgress != nil && eventType == types.QUERY_UNDERSTAND {
@@ -1019,6 +1020,31 @@ func emitKnowledgeReferencesEvent(ctx context.Context, chatManage *types.ChatMan
 		},
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to emit references event: %v", err)
+	}
+}
+
+// emitGraphEvent streams the retrieved entity subgraph (typed relations) to the
+// client as a `graph` SSE event, so downstream consumers (e.g. guide-agent's
+// graph-reasoning summary) can reason over explicit A—[type]→B—[type]→C chains.
+// Only emitted when graph retrieval actually produced relations.
+func emitGraphEvent(ctx context.Context, chatManage *types.ChatManage) {
+	if chatManage == nil || chatManage.EventBus == nil || chatManage.GraphResult == nil {
+		return
+	}
+	if len(chatManage.GraphResult.Relation) == 0 && len(chatManage.GraphResult.Node) == 0 {
+		return
+	}
+	logger.Infof(ctx, "Emitting graph event: %d nodes, %d relations",
+		len(chatManage.GraphResult.Node), len(chatManage.GraphResult.Relation))
+	if err := chatManage.EventBus.Emit(ctx, types.Event{
+		ID:        generateEventID("graph"),
+		Type:      types.EventType(event.EventAgentGraph),
+		SessionID: chatManage.SessionID,
+		Data: event.AgentGraphData{
+			Graph: chatManage.GraphResult,
+		},
+	}); err != nil {
+		logger.Errorf(ctx, "Failed to emit graph event: %v", err)
 	}
 }
 

@@ -103,6 +103,7 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventAgentToolCall, h.handleToolCall)
 	h.eventBus.On(event.EventAgentToolResult, h.handleToolResult)
 	h.eventBus.On(event.EventAgentReferences, h.handleReferences)
+	h.eventBus.On(event.EventAgentGraph, h.handleGraph)
 	h.eventBus.On(event.EventAgentFinalAnswer, h.handleFinalAnswer)
 	h.eventBus.On(event.EventAgentReflection, h.handleReflection)
 	h.eventBus.On(event.EventError, h.handleError)
@@ -393,6 +394,38 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 		logger.GetLogger(h.ctx).Error("Append references event to stream failed", "error", err)
 	}
 
+	return nil
+}
+
+// handleGraph forwards the entity subgraph (typed relations) to the SSE stream.
+// Unlike handleReferences, it does NOT reconstruct fields by hand — the graph
+// payload (nested name/type/chunks maps) is forwarded as-is, so nothing is
+// silently dropped the way match_type was. Downstream reads it from data.graph.
+func (h *AgentStreamHandler) handleGraph(ctx context.Context, evt event.Event) error {
+	var graph interface{}
+	switch d := evt.Data.(type) {
+	case event.AgentGraphData:
+		graph = d.Graph
+	case map[string]interface{}:
+		graph = d["graph"]
+	default:
+		return nil
+	}
+	if graph == nil {
+		return nil
+	}
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      types.ResponseTypeGraph,
+		Content:   "",
+		Done:      false,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"graph": graph,
+		},
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append graph event to stream failed", "error", err)
+	}
 	return nil
 }
 

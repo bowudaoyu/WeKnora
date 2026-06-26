@@ -182,6 +182,13 @@ type AgentReferencesData struct {
 	Iteration  int         `json:"iteration"`
 }
 
+// AgentGraphData carries the entity subgraph (typed relations) retrieved from the
+// graph store, so downstream consumers can do explicit relation-chain reasoning
+// (A —[type]→ B —[type]→ C) rather than re-deriving relations from chunk text.
+type AgentGraphData struct {
+	Graph interface{} `json:"graph"` // *types.GraphData {node:[{name,chunks,attributes}], relation:[{node1,node2,type}]}
+}
+
 // AgentFinalAnswerData represents final answer streaming data
 type AgentFinalAnswerData struct {
 	Content    string `json:"content"`

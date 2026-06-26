@@ -54,6 +54,7 @@ const (
 	EventAgentToolResult  EventType = "tool_result"  // 工具结果
 	EventAgentReflection  EventType = "reflection"   // Agent 反思
 	EventAgentReferences  EventType = "references"   // 知识引用
+	EventAgentGraph       EventType = "graph"        // 知识图谱实体子图(typed 关系,供下游做图谱推理)
 	EventAgentFinalAnswer EventType = "final_answer" // 最终答案
 
 	// MCP tool human approval (issue #1173)
