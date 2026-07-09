@@ -616,7 +616,7 @@ export default {
     deleteFailedKb: 'Delete failed',
     noDescription: 'No description',
     emptyKnowledgeDragDrop: 'Knowledge is empty, drag and drop to upload',
-    pdfDocFormat: 'pdf, doc format files, max 10M',
+    pdfDocFormat: 'pdf, doc format files, max {size}MB',
     textMarkdownFormat: 'text, markdown format files, max 200K',
     dragFileNotText: 'Please drag files instead of text or links',
     searchPlaceholder: 'Search knowledge bases...',

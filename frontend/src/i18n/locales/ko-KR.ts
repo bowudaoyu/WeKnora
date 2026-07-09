@@ -622,7 +622,7 @@ export default {
     deleteFailedKb: "삭제 실패",
     noDescription: "설명 없음",
     emptyKnowledgeDragDrop: "지식이 비어 있음, 드래그 앤 드롭으로 업로드",
-    pdfDocFormat: "pdf, doc 형식 파일, 최대 10MB",
+    pdfDocFormat: "pdf, doc 형식 파일, 최대 {size}MB",
     textMarkdownFormat: "text, markdown 형식 파일, 최대 200KB",
     dragFileNotText: "텍스트나 링크가 아닌 파일을 드래그하세요",
     searchPlaceholder: "지식베이스 검색...",

@@ -620,7 +620,7 @@ export default {
     deleteFailedKb: "删除失败",
     noDescription: "无描述",
     emptyKnowledgeDragDrop: "知识为空，拖放上传",
-    pdfDocFormat: "pdf、doc 格式文件，不超过10M",
+    pdfDocFormat: "pdf、doc 格式文件，不超过{size}MB",
     textMarkdownFormat: "text、markdown格式文件，不超过200K",
     dragFileNotText: "请拖拽文件而不是文本或链接",
     searchPlaceholder: "搜索知识库...",
