@@ -264,6 +264,12 @@ export function postUpload(url: string, data = {}, onUploadProgress?: (progressE
       "X-Request-ID": `${generateRandomString(12)}`,
     },
     onUploadProgress,
+    // 文件上传不能套用全局 30s 超时：上传耗时 = 文件大小 / 用户上行带宽，
+    // 一个 40MB 文件在 ~500KB/s 的链路上要 ~80s，30s 会在传输途中 abort，
+    // 请求永远到不了服务器，表现为“上传无任何反应”。上传时长天然不可预估，
+    // 这里关闭客户端超时(0=不限)，交给 nginx(proxy_read/send_timeout 3600s)与
+    // TCP 层兜底；上传进度由 onUploadProgress 反馈，不会真的无限等待。
+    timeout: 0,
   });
 }
 
