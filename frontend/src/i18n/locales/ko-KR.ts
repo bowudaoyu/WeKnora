@@ -1473,6 +1473,7 @@ export default {
     extractSuccess: "엔티티 관계 추출 성공",
     extractFailed: "엔티티 관계 추출 실패",
     exampleLoaded: "예시가 로드되었습니다",
+    templateLoaded: "박물관 도메인 기본 템플릿이 로드되었습니다. 필요에 따라 수정하세요",
     exampleCleared: "예시가 지워졌습니다",
     disabledWarning:
       "지식 그래프 데이터베이스가 활성화되지 않아 엔티티 관계 추출 기능을 사용할 수 없습니다",

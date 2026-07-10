@@ -1482,6 +1482,7 @@ export default {
     extractSuccess: "实体关系提取成功",
     extractFailed: "实体关系提取失败",
     exampleLoaded: "示例已加载",
+    templateLoaded: "已加载博物馆领域默认模板，可按需修改",
     exampleCleared: "示例已清除",
     disabledWarning: "知识图谱数据库未启用，实体关系提取功能将无法使用",
     howToEnable: "如何启用知识图谱？",

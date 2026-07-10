@@ -672,7 +672,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       // 默认关闭实体关系提取：后端 validateExtractConfig 在 enabled=true 时强制要求
       // text/tags/nodes/relations 全部非空，否则建库/保存直接报 "text cannot be empty"。
       // 而新建弹窗默认不带示例，故默认开会让建库流程整体失败。要用 GraphRAG 时，
-      // 在「知识图谱」面板手动开此开关并点「默认示例」(或自填示例后点开始提取)即可。
+      // 在「知识图谱」面板手动开此开关——开关打开时若字段全空会自动载入博物馆领域
+      // 默认模板（graphTemplates.ts），可按需修改后直接建库。
       enabled: false,
       text: '',
       tags: [] as string[],

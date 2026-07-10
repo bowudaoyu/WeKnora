@@ -1618,6 +1618,7 @@ export default {
     extractSuccess: 'Entity-relationship extraction successful',
     extractFailed: 'Entity-relationship extraction failed',
     exampleLoaded: 'Example loaded',
+    templateLoaded: 'Museum domain template loaded, edit as needed',
     exampleCleared: 'Example cleared',
     disabledWarning: 'Knowledge graph database is not enabled, entity-relationship extraction will not be available',
     howToEnable: 'How to enable knowledge graph?',

@@ -308,6 +308,7 @@ import { ref, watch, onMounted, computed, withDefaults } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
+import { MUSEUM_GRAPH_TEMPLATE } from './graphTemplates'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useAuthStore } from '@/stores/auth'
 
@@ -390,6 +391,16 @@ const handleEnabledChange = () => {
     localGraphExtract.value.tags = []
     localGraphExtract.value.nodes = []
     localGraphExtract.value.relations = []
+  } else if (
+    // 开启且四字段全空（新建库场景）时自动载入领域模板，免去每次手填；
+    // 编辑已有库时字段非空，不会被覆盖
+    !localGraphExtract.value.text &&
+    !localGraphExtract.value.tags.length &&
+    !localGraphExtract.value.nodes.length &&
+    !localGraphExtract.value.relations.length
+  ) {
+    applyMuseumTemplate()
+    MessagePlugin.success(t('graphSettings.templateLoaded'))
   }
   handleConfigChange()
 }
@@ -526,21 +537,20 @@ const handleExtract = async () => {
   }
 }
 
+// 载入博物馆领域模板（深拷贝，避免多次加载后编辑串改模板常量）
+const applyMuseumTemplate = () => {
+  localGraphExtract.value.text = MUSEUM_GRAPH_TEMPLATE.text
+  localGraphExtract.value.tags = [...MUSEUM_GRAPH_TEMPLATE.tags]
+  localGraphExtract.value.nodes = MUSEUM_GRAPH_TEMPLATE.nodes.map(n => ({
+    name: n.name,
+    attributes: [...n.attributes]
+  }))
+  localGraphExtract.value.relations = MUSEUM_GRAPH_TEMPLATE.relations.map(r => ({ ...r }))
+}
+
 // 默认示例
 const defaultExtractExample = () => {
-  localGraphExtract.value.text = `"Romeo and Juliet" is a tragedy written by William Shakespeare early in his career, and is one of the most frequently performed plays in world literature. The play follows two young lovers from feuding families in Verona, Italy — the Montagues and the Capulets. Written around 1594-1596, it was first published in quarto in 1597. The full title is "The Most Excellent and Lamentable Tragedy of Romeo and Juliet." The story has been adapted countless times for stage, film, and other media.`
-  localGraphExtract.value.tags = ['Author', 'Alias']
-  localGraphExtract.value.nodes = [
-    {name: 'Romeo and Juliet', attributes: ['One of the most frequently performed plays', 'Written around 1594-1596', 'A tragedy']},
-    {name: 'The Most Excellent and Lamentable Tragedy of Romeo and Juliet', attributes: ['Full title of Romeo and Juliet']},
-    {name: 'William Shakespeare', attributes: ['English playwright', 'Author of Romeo and Juliet']},
-    {name: 'Verona', attributes: ['City in Italy', 'Setting of the play']}
-  ]
-  localGraphExtract.value.relations = [
-    {node1: 'Romeo and Juliet', node2: 'The Most Excellent and Lamentable Tragedy of Romeo and Juliet', type: 'Alias'},
-    {node1: 'Romeo and Juliet', node2: 'William Shakespeare', type: 'Author'},
-    {node1: 'Romeo and Juliet', node2: 'Verona', type: 'Setting'}
-  ]
+  applyMuseumTemplate()
   handleNodesChange()
   MessagePlugin.success(t('graphSettings.exampleLoaded'))
 }
