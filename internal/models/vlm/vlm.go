@@ -34,6 +34,15 @@ type Config struct {
 	CustomHeaders map[string]string
 	AppID         string
 	AppSecret     string
+	// MaxTokens overrides the OpenAI-compatible request's max_tokens.
+	// Zero keeps the package default (defaultMaxToks), so every existing
+	// caller behaves exactly as before.
+	MaxTokens int
+	// Temperature overrides the request temperature. nil keeps the package
+	// default (defaultTemp); a pointer is required because dedicated OCR
+	// models want an explicit 0.0, which is indistinguishable from "unset"
+	// on a bare float.
+	Temperature *float32
 }
 
 // ConfigFromModel 根据 types.Model 构造 vlm.Config。

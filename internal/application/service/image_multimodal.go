@@ -74,6 +74,11 @@ type ImageMultimodalService struct {
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
 	spanTracker SpanTracker
+
+	// scanOCR is the optional self-hosted document-parsing model that takes
+	// over pages docreader tagged as scanned_pdf. nil when SCAN_OCR_BASE_URL
+	// is unset, in which case those pages keep using the KB's VLM.
+	scanOCR *scanOCRBackend
 }
 
 func NewImageMultimodalService(
@@ -90,6 +95,19 @@ func NewImageMultimodalService(
 	fileSvc interfaces.FileService,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
+	// Configuration error here must not take the whole container down: the
+	// service stays fully functional on the VLM path, it just loses the
+	// cheap local route.
+	scanOCR, err := newScanOCRBackendFromEnv()
+	if err != nil {
+		logger.Warnf(context.Background(),
+			"[ImageMultimodal] Scanned-page OCR backend disabled: %v", err)
+	} else if scanOCR != nil {
+		logger.Infof(context.Background(),
+			"[ImageMultimodal] Scanned-page OCR backend enabled: model=%s skip_caption=%v",
+			scanOCR.modelName, scanOCR.skipCaption)
+	}
+
 	return &ImageMultimodalService{
 		chunkService:   chunkService,
 		modelService:   modelService,
@@ -103,6 +121,7 @@ func NewImageMultimodalService(
 		redisClient:    redisClient,
 		fileSvc:        fileSvc,
 		spanTracker:    spanTracker,
+		scanOCR:        scanOCR,
 	}
 }
 
@@ -201,18 +220,34 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}()
 
+	// A scanned page routed to the local document-parsing model needs no VLM
+	// at all when captioning is skipped, so resolving one is best-effort in
+	// that case — this is what lets a knowledge base ingest scanned books
+	// without any cloud VLM configured.
+	useScanOCR := s.scanOCR.handles(payload)
+	vlmOptional := useScanOCR && s.scanOCR.skipCaption
+
 	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
-		handleErr = fmt.Errorf("resolve VLM: %w", err)
-		return handleErr
+		if !vlmOptional {
+			handleErr = fmt.Errorf("resolve VLM: %w", err)
+			return handleErr
+		}
+		logger.Infof(ctx,
+			"[ImageMultimodal] No VLM for KB %s (%v); scanned page handled by local OCR backend only",
+			payload.KnowledgeBaseID, err)
+		vlmModel = nil
 	}
 	// Capture the resolved VLM model id (or "legacy_inline" for the
 	// legacy inline-config path) so the trace shows WHICH model handled
 	// this image. Without this, debugging "VLM is slow" requires a
 	// separate hop to the KB config.
-	if id := strings.TrimSpace(vlmCfg.ModelID); id != "" {
-		imgOut["vlm_model_id"] = id
-	} else {
+	switch {
+	case vlmModel == nil:
+		imgOut["vlm_model_id"] = "none"
+	case strings.TrimSpace(vlmCfg.ModelID) != "":
+		imgOut["vlm_model_id"] = strings.TrimSpace(vlmCfg.ModelID)
+	default:
 		imgOut["vlm_model_id"] = "legacy_inline"
 	}
 
@@ -244,7 +279,28 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			imgOut["ocr_prompt"] = "default"
 		}
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		var ocrText string
+		var ocrErr error
+		switch {
+		case useScanOCR:
+			imgOut["ocr_backend"] = s.scanOCR.modelName
+			ocrText, ocrErr = s.scanOCR.Recognize(ctx, imgBytes)
+			// The local model is an optimisation, not a dependency: if the
+			// box is down mid-ingest, fall back to the VLM rather than
+			// dropping a page out of the book.
+			if ocrErr != nil && vlmModel != nil {
+				logger.Warnf(ctx,
+					"[ImageMultimodal] Local OCR backend failed for %s (%v), falling back to VLM",
+					payload.ImageURL, ocrErr)
+				imgOut["ocr_fallback"] = "vlm"
+				ocrText, ocrErr = vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+			}
+		case vlmModel != nil:
+			imgOut["ocr_backend"] = "vlm"
+			ocrText, ocrErr = vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		default:
+			ocrErr = fmt.Errorf("no OCR backend available")
+		}
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
@@ -262,14 +318,24 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+	// "A scanned page of Chinese text" is not a useful caption: it costs a
+	// second full-image round-trip per page and adds a near-duplicate chunk
+	// next to the OCR text. Skip it when the local OCR backend owns the page.
+	switch {
+	case useScanOCR && s.scanOCR.skipCaption:
+		imgOut["caption_skipped"] = "scanned_page"
+	case vlmModel == nil:
+		imgOut["caption_skipped"] = "no_vlm"
+	default:
+		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+		if capErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+			imgOut["caption_error"] = capErr.Error()
+		} else if caption != "" {
+			imageInfo.Caption = caption
+			imgOut["caption_chars"] = len([]rune(caption))
+			imgOut["caption_preview"] = previewText(caption, 200)
+		}
 	}
 
 	// Build child chunks for OCR and caption results
