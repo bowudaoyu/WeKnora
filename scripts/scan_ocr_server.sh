@@ -35,6 +35,9 @@ SCAN_OCR_MAX_LEN=${SCAN_OCR_MAX_LEN:-32768}
 
 export HF_HOME=${HF_HOME:-$SCAN_OCR_HOME/hf}
 export HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+# hf-mirror does not proxy HuggingFace's Xet CAS backend, so weight downloads
+# fail with "401 Unauthorized ... cas-server.xethub.hf.co" unless Xet is off.
+export HF_HUB_DISABLE_XET=${HF_HUB_DISABLE_XET:-1}
 export VLLM_LOGGING_LEVEL=${VLLM_LOGGING_LEVEL:-INFO}
 
 PYBIN="$SCAN_OCR_HOME/venv/bin/python"

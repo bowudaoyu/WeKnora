@@ -49,17 +49,57 @@
 
 ### 1. 安装 vLLM
 
+**先看驱动版本**，这一步决定后面所有命令：
+
 ```bash
-export HF_HOME=/data/ocr/hf HF_ENDPOINT=https://hf-mirror.com
-mkdir -p /data/ocr && python3 -m venv /data/ocr/venv
-/data/ocr/venv/bin/python -m pip install -i https://mirrors.aliyun.com/pypi/simple vllm huggingface_hub
+nvidia-smi --query-gpu=driver_version --format=csv
 ```
 
-国内机器建议按上面指定 pypi 与 HuggingFace 镜像，直连经常断。
+vLLM 自 **v0.20.0** 起 PyPI 默认 wheel 改成了 **CUDA 13** 构建，要求驱动
+**≥ 580**。驱动低于 580 时 `pip install vllm` 装得上、一跑就废
+（`CUDA driver version is insufficient`）。
+
+vLLM 同时为每个版本发布 `+cu129` 变体，CUDA 12.x 靠 minor version
+compatibility 可以在 ≥525 的驱动上运行。本项目那台 A100 驱动是 550.107.02
+（CUDA 12.4），因此走 cu129 路线：
+
+```bash
+mkdir -p /data/ocr && python3 -m venv /data/ocr/venv
+PY=/data/ocr/venv/bin/python
+
+# 1) 先装 cu129 的 torch 全家桶（download.pytorch.org 国内直连速度尚可）
+"$PY" -m pip install --index-url https://download.pytorch.org/whl/cu129 \
+  torch==2.13.0 torchvision==0.28.0 torchaudio==2.11.0
+"$PY" -c 'import torch; print(torch.__version__, torch.cuda.is_available())'
+# 期望 2.13.0+cu129 True —— 这一行是整条路线的成败点，False 就别往下走
+
+# 2) 再装 vLLM 的 cu129 wheel（GitHub release 资产，不是 PyPI 上那个）
+V=0.27.1
+W="vllm-${V}+cu129-cp38-abi3-manylinux_2_28_x86_64.whl"
+curl -L -C - -o "/data/ocr/$W" \
+  "https://github.com/vllm-project/vllm/releases/download/v${V}/vllm-${V}%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl"
+"$PY" -m pip install "/data/ocr/$W" \
+  -i https://mirrors.aliyun.com/pypi/simple \
+  --extra-index-url https://download.pytorch.org/whl/cu129
+```
+
+**驱动 ≥580 的机器**不需要这些，直接 `pip install vllm huggingface_hub`。
+
+> **wheel 文件名不能改**：pip 靠文件名解析版本与平台标签，存成
+> `vllm-cu129.whl` 会直接报 `Invalid wheel filename`。
+
+**国内网络注意事项**（那台机器实测）：
+
+- GitHub 直连不通，release 资产加 `https://gh-proxy.com/` 前缀；
+- PyPI 用 `https://mirrors.aliyun.com/pypi/simple`；
+- HuggingFace 用 `HF_ENDPOINT=https://hf-mirror.com`，且**必须设
+  `HF_HUB_DISABLE_XET=1`**——hf-mirror 不代理 Xet CAS 后端，否则下载会以
+  `401 Unauthorized ... cas-server.xethub.hf.co` 失败。
 
 ### 2. 起服务
 
 ```bash
+export HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1   # 国内需要
 scripts/scan_ocr_server.sh start     # 首次会自动下载权重（约 2GB）
 scripts/scan_ocr_server.sh status    # 探活 + 列出已加载模型
 scripts/scan_ocr_server.sh logs
