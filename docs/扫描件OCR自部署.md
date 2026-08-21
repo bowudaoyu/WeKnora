@@ -63,8 +63,22 @@ vLLM 同时为每个版本发布 `+cu129` 变体，CUDA 12.x 靠 minor version
 compatibility 可以在 ≥525 的驱动上运行。本项目那台 A100 驱动是 550.107.02
 （CUDA 12.4），因此走 cu129 路线：
 
+**Python 必须是 3.12 或更高**。vLLM 依赖的 flashinfer 在模块顶层写了
+`array.array[int]` 这类注解，而 `array.array` 到 Python 3.12 才支持下标，
+3.10/3.11 上引擎启动会以 `TypeError: 'type' object is not subscriptable` 失败。
+Ubuntu 22.04 自带 3.10，需要额外装：
+
 ```bash
-mkdir -p /data/ocr && python3 -m venv /data/ocr/venv
+sudo add-apt-repository -y ppa:deadsnakes/ppa && sudo apt-get update
+sudo apt-get install -y python3.12 python3.12-venv python3.12-dev
+```
+
+`-dev` 不能省：triton 会在运行时 JIT 编译 `cuda_utils.c`，缺 `Python.h`
+时报的是 `Model architectures [...] failed to be inspected`，看起来像模型
+不支持，实际只是缺头文件。
+
+```bash
+mkdir -p /data/ocr && python3.12 -m venv /data/ocr/venv
 PY=/data/ocr/venv/bin/python
 
 # 1) 先装 cu129 的 torch 全家桶（download.pytorch.org 国内直连速度尚可）
@@ -116,10 +130,18 @@ scripts/scan_ocr_server.sh logs
 SCAN_OCR_BASE_URL=http://<GPU 机 IP>:9800/v1
 ```
 
+**后端跑在 Docker 里时不能填 `localhost`**——那是容器自己。填 compose 网络的
+网关地址：
+
+```bash
+docker inspect WeKnora-app -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}'
+# 本项目那台机器上是 172.20.0.1，因此 SCAN_OCR_BASE_URL=http://172.20.0.1:9800/v1
+docker exec WeKnora-app curl -s http://172.20.0.1:9800/v1/models   # 先验证连通
+```
+
 其余参数都有默认值，完整说明见 `.env.example` 的「扫描件专用 OCR 后端」一节。
 
 **`SCAN_OCR_BASE_URL` 不配置时本功能完全关闭**，扫描页继续走原来的 VLM 路径。
-后端跑在容器里时不要填 `localhost`。
 
 重启后端后，日志里会出现：
 
@@ -165,6 +187,22 @@ trace / `image_multimodal` 输出里的相关字段：
 - **请求超时**：`VLM_HTTP_TIMEOUT_SECONDS` 调大，本后端共用这个超时。
 - **输出里有奇怪的 `<img src="images/bbox_...">`**：正常，会被
   `cleanScanOCRText` 剥掉；如果泄漏到 chunk 里说明模型输出格式变了。
+
+## 实测
+
+A100-SXM4-40GB（`--gpu-memory-utilization 0.25`，KV cache 6.02 GiB /
+494,592 tokens），一页 1654×2339 的中文双栏论文扫描件（含三线表、公式、
+上下标，加了旋转和噪点模拟扫描）：
+
+- **2.3 秒/页**，prompt 3922 tokens，输出 709 tokens
+- 双栏阅读顺序正确（摘要→引言→实验方法→结果→结论，没有横穿两栏）
+- 表格转成 HTML `<table>`，四行五列数据逐格正确
+- 公式转 LaTeX：`$$\mathrm{LOD} = 3\sigma / \mathrm{S} \cdot \sqrt{\mathrm{t}}$$`
+- 上下标正确：`SiO₂` → `$\mathrm{SiO}_{2}$`，作者角标 → `$^{1}$`
+- **忠实转写**：测试图里混进的一处错字（中文句子里夹了个英文单词）被
+  原样保留，没有被"顺"成通顺中文——这正是它相对通用 VLM 的核心价值
+
+按 2.3 秒/页算，一本 300 页的扫描书约 12 分钟，成本只有电费。
 
 ## 一个容易被忽略的质量杠杆：渲染分辨率
 

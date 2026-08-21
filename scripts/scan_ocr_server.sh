@@ -41,6 +41,11 @@ export HF_HUB_DISABLE_XET=${HF_HUB_DISABLE_XET:-1}
 export VLLM_LOGGING_LEVEL=${VLLM_LOGGING_LEVEL:-INFO}
 
 PYBIN="$SCAN_OCR_HOME/venv/bin/python"
+# vLLM shells out to helper binaries that pip installed into the venv (ninja,
+# for the runtime kernel compile). Invoking $PYBIN directly does not activate
+# the venv, so its bin dir has to be put on PATH explicitly or engine startup
+# dies with "FileNotFoundError: ... 'ninja'".
+export PATH="$SCAN_OCR_HOME/venv/bin:$PATH"
 LOG="$SCAN_OCR_HOME/server.log"
 PIDFILE="$SCAN_OCR_HOME/server.pid"
 
