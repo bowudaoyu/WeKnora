@@ -188,6 +188,33 @@ trace / `image_multimodal` 输出里的相关字段：
 - **输出里有奇怪的 `<img src="images/bbox_...">`**：正常，会被
   `cleanScanOCRText` 剥掉；如果泄漏到 chunk 里说明模型输出格式变了。
 
+## 生产接入实录（2026-08-22）
+
+线上（GPU 机 docker compose 栈）已按以下步骤接入，可作为其他环境的模板：
+
+1. OCR 服务交给 systemd 托管（开机自启、崩溃重拉）：
+   `/etc/systemd/system/scan-ocr.service` → `ExecStart=/data/ocr/scan_ocr_server.sh start`，
+   `Type=forking` + `PIDFile=/data/ocr/server.pid`。
+2. `.env` 追加两行后 `docker compose build app && docker compose up -d app`：
+   - `SCAN_OCR_BASE_URL=http://172.20.0.1:9800/v1`（compose 网关，容器内可达）
+   - `DUCKDB_SKIP_EXTENSION_LOAD=1`——**这台机器没这行起不来**：DuckDB 启动时
+     INSTALL 扩展要访问公网，无出口时整个后端无超时挂死，容器停在
+     `health: starting`，最后一条日志是 "Connected to docreader"。
+3. 启动日志确认两行：`[DuckDB] Skipping ... extension` 与
+   `[ImageMultimodal] Scanned-page OCR backend enabled: model=OvisOCR2`。
+
+端到端验证（知识库**未配 VLM**，五页扫描期刊 test1.pdf）：
+
+- docreader 判定 `5 pages (5 scanned, 0 text)` → 渲染 5 张整页图
+- OvisOCR2 逐页 OCR → 5 个 `image_ocr` chunk（223–3405 字）
+- 向量化落库：8 条 × 1024 维（text-embedding-v4），摘要自动生成
+- 检索「鄂君启金节是在哪里出土的？」Top1 命中含答案的 OCR chunk
+- 上传到 completed 全程约 40 秒
+
+注意：通过 API 建知识库时必须显式传 `embedding_model_id`
+（如 `builtin-embedding-default`），漏传时文档会停在 processing，
+日志报 `processChunks get embedding model failed`。
+
 ## 实测
 
 A100-SXM4-40GB（`--gpu-memory-utilization 0.25`，KV cache 6.02 GiB /
