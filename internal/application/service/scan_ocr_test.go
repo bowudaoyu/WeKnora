@@ -169,3 +169,18 @@ func TestEnvBoolOrDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestScanOCRConfigured(t *testing.T) {
+	t.Setenv("SCAN_OCR_BASE_URL", "")
+	if scanOCRConfigured() {
+		t.Error("unset SCAN_OCR_BASE_URL must report not configured")
+	}
+	t.Setenv("SCAN_OCR_BASE_URL", "   ")
+	if scanOCRConfigured() {
+		t.Error("blank SCAN_OCR_BASE_URL must report not configured")
+	}
+	t.Setenv("SCAN_OCR_BASE_URL", "http://127.0.0.1:9800/v1")
+	if !scanOCRConfigured() {
+		t.Error("set SCAN_OCR_BASE_URL must report configured")
+	}
+}

@@ -633,11 +633,18 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
 	}
 
-	// Check if this document has extracted images that will be processed asynchronously
+	// Check if this document has extracted images that will be processed asynchronously.
+	// EnableMultimodel is effectively a "KB has a VLM" switch — but a scanned PDF's
+	// pages can be transcribed by the self-hosted document-parsing backend alone
+	// (SCAN_OCR_BASE_URL, see scan_ocr.go), so widen the gate for exactly that
+	// document class. Ordinary illustrations still require a VLM: without one their
+	// tasks could neither OCR nor caption, so they keep the original gating.
+	multimodalWanted := options.EnableMultimodel ||
+		(scanOCRConfigured() && options.Metadata["image_source_type"] == "scanned_pdf")
 	isImage := IsImageType(knowledge.FileType)
 	isVideo := IsVideoType(knowledge.FileType)
-	pendingMultimodal := isImage && options.EnableMultimodel && len(options.StoredImages) > 0
-	pendingPDFMultimodal := !isImage && !isVideo && options.EnableMultimodel && len(options.StoredImages) > 0
+	pendingMultimodal := isImage && multimodalWanted && len(options.StoredImages) > 0
+	pendingPDFMultimodal := !isImage && !isVideo && multimodalWanted && len(options.StoredImages) > 0
 
 	now := time.Now()
 	finalizeIndexedKnowledgeState(
@@ -653,7 +660,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
-	if options.EnableMultimodel && len(options.StoredImages) > 0 {
+	if multimodalWanted && len(options.StoredImages) > 0 {
 		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
 			"image_count":    len(options.StoredImages),
 			"enable_ocr":     true,

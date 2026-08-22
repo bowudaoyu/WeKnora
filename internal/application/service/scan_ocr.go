@@ -67,6 +67,15 @@ type scanOCRBackend struct {
 	skipCaption bool
 }
 
+// scanOCRConfigured reports whether the self-hosted scanned-page OCR backend
+// is configured at all (SCAN_OCR_BASE_URL set). Enqueue-time gating needs this
+// cheap check without constructing a client: a scanned PDF's pages can be
+// OCR'd by this backend even when the knowledge base has no VLM configured,
+// so the multimodal fan-out must not be skipped for those documents.
+func scanOCRConfigured() bool {
+	return strings.TrimSpace(os.Getenv("SCAN_OCR_BASE_URL")) != ""
+}
+
 // newScanOCRBackendFromEnv builds the backend from the environment, returning
 // (nil, nil) when SCAN_OCR_BASE_URL is unset — i.e. the feature is off and the
 // original behaviour is preserved verbatim.
