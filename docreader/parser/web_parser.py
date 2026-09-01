@@ -24,6 +24,12 @@ _SPA_WAIT_TIMEOUT_MS = 15_000
 _SPA_MIN_TEXT_LEN = 80
 # Minimum visible characters for Playwright text fallback when trafilatura fails.
 _MIN_FALLBACK_TEXT_LEN = 50
+# A body this short means trafilatura returned metadata and page furniture but
+# no article — worth a second attempt before falling back to plain visible text.
+_MIN_EXTRACTED_BODY_LEN = 200
+_FRONT_MATTER = re.compile(r"^---\n.*?\n---\n", re.DOTALL)
+_SECTION_OPEN = re.compile(r"<section\b", re.IGNORECASE)
+_SECTION_CLOSE = re.compile(r"</section\s*>", re.IGNORECASE)
 # Headless Chromium advertises itself as `HeadlessChrome`, which WeChat
 # Official Account pages answer with a "环境异常，完成验证后即可继续访问" stub
 # instead of the article. Presenting a plain desktop Chrome UA is enough to get
@@ -74,10 +80,7 @@ def browser_context_options() -> dict:
     }
 
 
-def extract_markdown_from_html(html: str) -> Optional[str]:
-    """Run trafilatura on HTML; return markdown or None if nothing extracted."""
-    if not html or not html.strip():
-        return None
+def _run_trafilatura(html: str) -> Optional[str]:
     md_text = extract(
         html,
         output_format="markdown",
@@ -88,6 +91,46 @@ def extract_markdown_from_html(html: str) -> Optional[str]:
     )
     if not md_text or not md_text.strip():
         return None
+    return md_text
+
+
+def _markdown_body_len(md: Optional[str]) -> int:
+    """Length of the markdown minus the YAML front matter trafilatura emits."""
+    if not md:
+        return 0
+    match = _FRONT_MATTER.match(md)
+    return len(md) - match.end() if match else len(md)
+
+
+def sections_to_divs(html: str) -> str:
+    """Rewrite `<section>` to `<div>`.
+
+    WeChat Official Account articles nest their whole body in `<section>`
+    elements, which trafilatura's tag catalogue skips — the extraction then
+    yields only the front matter and page furniture. `<div>` carries no
+    semantics trafilatura treats differently, so this is a safe repair.
+    """
+    return _SECTION_CLOSE.sub("</div>", _SECTION_OPEN.sub("<div", html))
+
+
+def extract_markdown_from_html(html: str) -> Optional[str]:
+    """Run trafilatura on HTML; return markdown or None if nothing extracted."""
+    if not html or not html.strip():
+        return None
+    md_text = _run_trafilatura(html)
+    if _markdown_body_len(md_text) >= _MIN_EXTRACTED_BODY_LEN:
+        return md_text
+
+    # Nothing but front matter came back: retry on section-free HTML before
+    # giving up (see sections_to_divs). Costs a second pass only in this case.
+    retried = _run_trafilatura(sections_to_divs(html))
+    if _markdown_body_len(retried) > _markdown_body_len(md_text):
+        logger.info(
+            "Trafilatura body was %d chars; <section> rewrite recovered %d",
+            _markdown_body_len(md_text),
+            _markdown_body_len(retried),
+        )
+        return retried
     return md_text
 
 

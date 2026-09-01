@@ -1,4 +1,5 @@
 import asyncio
+import pathlib
 import unittest
 from unittest import mock
 
@@ -7,6 +8,7 @@ from docreader.parser.web_parser import (
     browser_context_options,
     build_visible_text_fallback,
     extract_markdown_from_html,
+    sections_to_divs,
 )
 
 
@@ -24,6 +26,27 @@ class TestWebParserHelpers(unittest.TestCase):
         md = extract_markdown_from_html(html)
         self.assertIsNotNone(md)
         self.assertIn("Hello", md)
+
+    def test_extract_markdown_wechat_article(self):
+        """Regression: trafilatura returns only front matter for this page.
+
+        Fixture is a trimmed capture of a real WeChat Official Account article
+        (mp.weixin.qq.com/s/fooVR2WJ2pP1g7xxy4TJ_Q). Its body lives in nested
+        <section> elements; without the rewrite the extraction is 139 chars of
+        page furniture and none of the article.
+        """
+        html = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "testdata"
+            / "wechat_article_sections.html"
+        ).read_text(encoding="utf-8")
+        md = extract_markdown_from_html(html)
+        self.assertIsNotNone(md)
+        self.assertIn("今天开始按单元整理辽宁省博物馆", md)
+
+    def test_sections_to_divs_rewrites_both_tags(self):
+        html = '<section class="a"><SECTION>x</SECTION></section >'
+        self.assertNotIn("section", sections_to_divs(html).lower())
 
     def test_build_fallback_too_short(self):
         self.assertIsNone(build_visible_text_fallback("short"))
