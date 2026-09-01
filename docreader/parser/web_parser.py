@@ -24,6 +24,14 @@ _SPA_WAIT_TIMEOUT_MS = 15_000
 _SPA_MIN_TEXT_LEN = 80
 # Minimum visible characters for Playwright text fallback when trafilatura fails.
 _MIN_FALLBACK_TEXT_LEN = 50
+# Headless Chromium advertises itself as `HeadlessChrome`, which WeChat
+# Official Account pages answer with a "环境异常，完成验证后即可继续访问" stub
+# instead of the article. Presenting a plain desktop Chrome UA is enough to get
+# the real page back.
+_DESKTOP_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
 
 # Monkey-patch trafilatura internals to better support WeChat Official Account
 # articles, whose images live on `mmbiz.qpic.cn` without a standard file
@@ -55,6 +63,15 @@ class _ScrapeResult:
     html: str
     visible_text: str
     page_title: str
+
+
+def browser_context_options() -> dict:
+    """Browser context options that make the headless browser look like a desktop one."""
+    return {
+        "user_agent": _DESKTOP_UA,
+        "locale": "zh-CN",
+        "viewport": {"width": 1280, "height": 900},
+    }
 
 
 def extract_markdown_from_html(html: str) -> Optional[str]:
@@ -125,7 +142,7 @@ async def read_visible_text(page: Page) -> str:
 class StdWebParser(BaseParser):
     """Standard web page parser using Playwright and Trafilatura.
 
-    This parser scrapes web pages using Playwright's WebKit browser and extracts
+    This parser scrapes web pages using Playwright's Chromium browser and extracts
     clean content using Trafilatura library. It supports proxy configuration and
     converts HTML content to markdown format.
     """
@@ -160,9 +177,10 @@ class StdWebParser(BaseParser):
                 # Configure proxy if available
                 if self.proxy:
                     kwargs["proxy"] = {"server": self.proxy}
-                logger.info("Launching WebKit browser")
-                browser = await p.webkit.launch(**kwargs)
-                page = await browser.new_page()
+                logger.info("Launching Chromium browser")
+                browser = await p.chromium.launch(**kwargs)
+                context = await browser.new_context(**browser_context_options())
+                page = await context.new_page()
 
                 logger.info(f"Navigating to URL: {url}")
                 try:

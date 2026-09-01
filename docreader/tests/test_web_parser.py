@@ -1,6 +1,10 @@
+import asyncio
 import unittest
+from unittest import mock
 
 from docreader.parser.web_parser import (
+    StdWebParser,
+    browser_context_options,
     build_visible_text_fallback,
     extract_markdown_from_html,
 )
@@ -36,6 +40,46 @@ class TestWebParserHelpers(unittest.TestCase):
         text = "B" * 60
         md = build_visible_text_fallback(text, page_title="")
         self.assertEqual(md, text)
+
+
+class TestBrowserContextOptions(unittest.TestCase):
+    def test_user_agent_is_not_headless(self):
+        """WeChat answers a `HeadlessChrome` UA with a verification stub."""
+        ua = browser_context_options()["user_agent"]
+        self.assertNotIn("Headless", ua)
+        self.assertIn("Chrome/", ua)
+
+
+class TestScrapeBrowserSetup(unittest.IsolatedAsyncioTestCase):
+    async def test_scrape_uses_chromium_with_spoofed_user_agent(self):
+        """Only chromium is deployed, and it must not use its default UA."""
+        page = mock.AsyncMock()
+        page.title.return_value = "T"
+        page.evaluate.return_value = "text"
+        page.content.return_value = "<html></html>"
+        context = mock.AsyncMock()
+        context.new_page.return_value = page
+        browser = mock.AsyncMock()
+        browser.new_context.return_value = context
+        chromium = mock.AsyncMock()
+        chromium.launch.return_value = browser
+        webkit = mock.AsyncMock()
+
+        pw = mock.MagicMock()
+        pw.chromium = chromium
+        pw.webkit = webkit
+        ctxmgr = mock.AsyncMock()
+        ctxmgr.__aenter__.return_value = pw
+
+        with mock.patch(
+            "docreader.parser.web_parser.async_playwright", return_value=ctxmgr
+        ):
+            await StdWebParser(title="t").scrape("https://example.com")
+
+        chromium.launch.assert_awaited_once()
+        webkit.launch.assert_not_awaited()
+        ua = browser.new_context.await_args.kwargs["user_agent"]
+        self.assertNotIn("Headless", ua)
 
 
 if __name__ == "__main__":

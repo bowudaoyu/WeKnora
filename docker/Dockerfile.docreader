@@ -150,8 +150,8 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 安装 Playwright 浏览器（网页解析）
-RUN python -m playwright install webkit
-RUN python -m playwright install-deps webkit
+RUN python -m playwright install chromium
+RUN python -m playwright install-deps chromium
 
 COPY docreader/pyproject.toml docreader/uv.lock ./
 COPY --from=builder /app/docreader docreader
