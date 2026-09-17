@@ -3,6 +3,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from lxml.etree import XPath
 from playwright.async_api import Page, async_playwright
@@ -38,6 +39,15 @@ _DESKTOP_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
+# Since mid-September 2026 WeChat 302s every long-form article link
+# (`/s?__biz=…&mid=…&idx=…&sn=…`) that lacks a non-empty `chksm` to the
+# `wappoc_appmsgcaptcha` page — regardless of IP, UA or browser. Any non-empty
+# value gets the real article back; short links (`/s/<token>`) are unaffected.
+# A `poc_token` copied from someone's browser also forces the captcha.
+_WECHAT_HOST = "mp.weixin.qq.com"
+_WECHAT_PLACEHOLDER_CHKSM = "chksm=0"
+_WECHAT_CAPTCHA_PATH = "/mp/wappoc_appmsgcaptcha"
+_WECHAT_CAPTCHA_TEXT = "当前环境异常，完成验证后即可继续访问"
 
 # Monkey-patch trafilatura internals to better support WeChat Official Account
 # articles, whose images live on `mmbiz.qpic.cn` without a standard file
@@ -69,6 +79,41 @@ class _ScrapeResult:
     html: str
     visible_text: str
     page_title: str
+    page_url: str = ""
+
+
+def normalize_wechat_article_url(url: str) -> str:
+    """Rewrite a long-form WeChat article link so it is not sent to the captcha.
+
+    Drops `poc_token` and adds a placeholder `chksm` when it is missing or
+    empty. The query string is edited as raw `k=v` pieces so `__biz`'s
+    trailing `==` keeps its original encoding. Other URLs pass through.
+    """
+    parts = urlsplit(url)
+    if parts.hostname != _WECHAT_HOST or parts.path != "/s" or not parts.query:
+        return url
+
+    pieces = [p for p in parts.query.split("&") if p]
+    keys = [p.split("=", 1)[0] for p in pieces]
+    if "__biz" not in keys or "sn" not in keys:
+        return url
+
+    kept = [
+        p
+        for p in pieces
+        if p.split("=", 1)[0] != "poc_token"
+        and not (p.split("=", 1)[0] == "chksm" and not p.partition("=")[2])
+    ]
+    if not any(p.split("=", 1)[0] == "chksm" for p in kept):
+        kept.append(_WECHAT_PLACEHOLDER_CHKSM)
+    return urlunsplit(parts._replace(query="&".join(kept)))
+
+
+def is_wechat_captcha_page(page_url: str, visible_text: str) -> bool:
+    """True when WeChat served its "环境异常" verification page instead of content."""
+    return _WECHAT_CAPTCHA_PATH in (page_url or "") or _WECHAT_CAPTCHA_TEXT in (
+        visible_text or ""
+    )
 
 
 def browser_context_options() -> dict:
@@ -214,6 +259,9 @@ class StdWebParser(BaseParser):
         """
         logger.info(f"Starting web page scraping for URL: {url}")
         empty = _ScrapeResult(html="", visible_text="", page_title="")
+        target_url = normalize_wechat_article_url(url)
+        if target_url != url:
+            logger.info("Rewrote WeChat article URL to avoid captcha: %s", target_url)
         try:
             async with async_playwright() as p:
                 kwargs = {}
@@ -225,10 +273,10 @@ class StdWebParser(BaseParser):
                 context = await browser.new_context(**browser_context_options())
                 page = await context.new_page()
 
-                logger.info(f"Navigating to URL: {url}")
+                logger.info(f"Navigating to URL: {target_url}")
                 try:
                     await page.goto(
-                        url,
+                        target_url,
                         timeout=_GOTO_TIMEOUT_MS,
                         wait_until="domcontentloaded",
                     )
@@ -243,6 +291,7 @@ class StdWebParser(BaseParser):
                 page_title = await page.title()
                 visible_text = await read_visible_text(page)
                 content = await page.content()
+                page_url = str(page.url)
                 logger.info(
                     "Retrieved %d bytes HTML, %d chars visible text, title=%r",
                     len(content),
@@ -258,6 +307,7 @@ class StdWebParser(BaseParser):
                 html=content,
                 visible_text=visible_text,
                 page_title=page_title or "",
+                page_url=page_url,
             )
 
         except Exception as e:
@@ -280,6 +330,12 @@ class StdWebParser(BaseParser):
         if not scrape_result.html and not scrape_result.visible_text:
             logger.error("Failed to scrape web page (no HTML or visible text)")
             return Document(content=f"Error parsing web page: {url}")
+
+        # Fail the import rather than index the verification page as the article.
+        if is_wechat_captcha_page(scrape_result.page_url, scrape_result.visible_text):
+            raise RuntimeError(
+                f"微信返回了「环境异常」验证页，未取到文章正文: {url}"
+            )
 
         md_text = extract_markdown_from_html(scrape_result.html)
         if not md_text:

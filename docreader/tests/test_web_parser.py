@@ -8,6 +8,8 @@ from docreader.parser.web_parser import (
     browser_context_options,
     build_visible_text_fallback,
     extract_markdown_from_html,
+    is_wechat_captcha_page,
+    normalize_wechat_article_url,
     sections_to_divs,
 )
 
@@ -65,6 +67,47 @@ class TestWebParserHelpers(unittest.TestCase):
         self.assertEqual(md, text)
 
 
+class TestWechatArticleUrl(unittest.TestCase):
+    _LONG = (
+        "https://mp.weixin.qq.com/s?__biz=MzU1NzkxNjc4NQ==&mid=2247488223"
+        "&idx=1&sn=3dc1b3b72c5d9b88274259f42c4c38c4"
+    )
+
+    def test_long_link_gets_placeholder_chksm(self):
+        """WeChat sends long links without `chksm` to the captcha page."""
+        self.assertEqual(normalize_wechat_article_url(self._LONG), self._LONG + "&chksm=0")
+
+    def test_poc_token_and_empty_chksm_are_dropped(self):
+        url = self._LONG + "&chksm=&poc_token=HBucq2qjKE7_43aQ&scene=21#rd"
+        self.assertEqual(
+            normalize_wechat_article_url(url),
+            self._LONG + "&scene=21&chksm=0#rd",
+        )
+
+    def test_existing_chksm_is_kept(self):
+        url = self._LONG + "&chksm=fd3a1c2b"
+        self.assertEqual(normalize_wechat_article_url(url), url)
+
+    def test_other_urls_untouched(self):
+        for url in (
+            "https://mp.weixin.qq.com/s/fooVR2WJ2pP1g7xxy4TJ_Q",
+            "https://example.com/s?__biz=a&sn=b",
+            "https://cloud.tencent.com/document/product/457/6759",
+        ):
+            self.assertEqual(normalize_wechat_article_url(url), url)
+
+    def test_captcha_page_detection(self):
+        self.assertTrue(
+            is_wechat_captcha_page(
+                "https://mp.weixin.qq.com/mp/wappoc_appmsgcaptcha?poc_token=x", ""
+            )
+        )
+        self.assertTrue(
+            is_wechat_captcha_page("", "环境异常\n当前环境异常，完成验证后即可继续访问。")
+        )
+        self.assertFalse(is_wechat_captcha_page(self._LONG, "正文"))
+
+
 class TestBrowserContextOptions(unittest.TestCase):
     def test_user_agent_is_not_headless(self):
         """WeChat answers a `HeadlessChrome` UA with a verification stub."""
@@ -103,6 +146,23 @@ class TestScrapeBrowserSetup(unittest.IsolatedAsyncioTestCase):
         webkit.launch.assert_not_awaited()
         ua = browser.new_context.await_args.kwargs["user_agent"]
         self.assertNotIn("Headless", ua)
+
+
+class TestParseRejectsCaptcha(unittest.TestCase):
+    def test_captcha_page_fails_instead_of_being_indexed(self):
+        """Regression: the "环境异常" stub was stored as the article body."""
+        from docreader.parser.web_parser import _ScrapeResult
+
+        stub = _ScrapeResult(
+            html="<html><title>环境异常</title><body>当前环境异常，完成验证后即可继续访问。</body></html>",
+            visible_text="环境异常\n当前环境异常，完成验证后即可继续访问。\n去验证",
+            page_title="微信公众平台",
+            page_url="https://mp.weixin.qq.com/mp/wappoc_appmsgcaptcha?poc_token=x",
+        )
+        parser = StdWebParser(title="t")
+        with mock.patch.object(StdWebParser, "scrape", mock.AsyncMock(return_value=stub)):
+            with self.assertRaisesRegex(RuntimeError, "环境异常"):
+                parser.parse_into_text(b"https://mp.weixin.qq.com/s?__biz=a&sn=b")
 
 
 if __name__ == "__main__":
