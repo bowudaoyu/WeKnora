@@ -29,7 +29,12 @@ func (d *debugEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 }
 
 func (d *debugEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {
-	return d.inner.BatchEmbedWithPool(ctx, d, texts)
+	// Keep the outer wrapper (e.g. Langfuse) when one is passed in; replacing
+	// it with d would make the pool skip every decorator above this one.
+	if model == nil {
+		model = d
+	}
+	return d.inner.BatchEmbedWithPool(ctx, model, texts)
 }
 
 func (d *debugEmbedder) GetModelName() string { return d.inner.GetModelName() }

@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -79,6 +81,24 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		return nil, nil
 	}
 
+	return relayStreamToGeneration(ctx, ch, gen), nil
+}
+
+// streamGeneration is the subset of *langfuse.Generation used while relaying
+// a stream; abstracted so the relay loop can be unit-tested.
+type streamGeneration interface {
+	MarkCompletionStart(t time.Time)
+	Finish(output interface{}, usage *langfuse.TokenUsage, err error)
+}
+
+// relayStreamToGeneration forwards ch to the caller while accumulating the
+// output for the generation. Error events finish the generation with ERROR
+// level. If the caller goes away (ctx done) the generation is finished right
+// away and the rest of ch is drained without forwarding, so neither this
+// goroutine nor the upstream producer blocks forever.
+func relayStreamToGeneration(
+	ctx context.Context, ch <-chan types.StreamResponse, gen streamGeneration,
+) <-chan types.StreamResponse {
 	wrapped := make(chan types.StreamResponse)
 	go func() {
 		defer close(wrapped)
@@ -88,6 +108,19 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		var toolCalls []types.LLMToolCall
 		var finishReason string
 		var firstToken bool
+		var streamErr error
+		forwarding := true
+		finished := false
+		finish := func(err error) {
+			if finished {
+				return
+			}
+			finished = true
+			output := buildLangfuseGenerationOutput(
+				string(contentBuf), string(reasoningBuf), finishReason, toolCalls,
+			)
+			gen.Finish(output, convertUsage(usage), err)
+		}
 
 		for resp := range ch {
 			if resp.ResponseType == types.ResponseTypeThinking && resp.Content != "" {
@@ -104,6 +137,9 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 				}
 				contentBuf = append(contentBuf, resp.Content...)
 			}
+			if resp.ResponseType == types.ResponseTypeError {
+				streamErr = errors.New(resp.Content)
+			}
 			if resp.Usage != nil {
 				usage = resp.Usage
 			}
@@ -113,15 +149,19 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 			if resp.FinishReason != "" {
 				finishReason = resp.FinishReason
 			}
-			wrapped <- resp
+			if !forwarding {
+				continue
+			}
+			select {
+			case wrapped <- resp:
+			case <-ctx.Done():
+				forwarding = false
+				finish(fmt.Errorf("stream abandoned by caller: %w", ctx.Err()))
+			}
 		}
-
-		output := buildLangfuseGenerationOutput(
-			string(contentBuf), string(reasoningBuf), finishReason, toolCalls,
-		)
-		gen.Finish(output, convertUsage(usage), nil)
+		finish(streamErr)
 	}()
-	return wrapped, nil
+	return wrapped
 }
 
 func buildLangfuseMessages(messages []Message) []map[string]interface{} {
