@@ -132,10 +132,17 @@ func (c *RemoteAPIChat) shapedRequest(messages []Message, opts *ChatOptions, isS
 func (c *RemoteAPIChat) buildOutbound(
 	messages []Message, opts *ChatOptions, isStream bool,
 ) (body any, endpoint string, useRawHTTP bool, err error) {
+	// 所有 Qwen 模型一律关闭思考：非 DashScope 的托管方（vLLM / SiliconFlow 等）
+	// 也按各自的 thinking 编码方式发送 false，不受 agent 配置影响。
+	if provider.IsQwenModel(c.modelName) {
+		opts = withThinkingDisabled(opts)
+	}
 	req := c.shapedRequest(messages, opts, isStream)
 
 	thinking := c.thinkingOverride
-	if thinking == nil {
+	if _, isQwen := c.adapter.(qwenProvider); isQwen || thinking == nil {
+		// DashScope Qwen 固定使用 qwenNoThinking（同时关闭 enable_search），
+		// 忽略 extra_config.thinking_control。
 		thinking = c.adapter.Thinking()
 	}
 	customBody, useRaw := thinking.Apply(&req, opts, isStream)
@@ -151,6 +158,18 @@ func (c *RemoteAPIChat) buildOutbound(
 	endpoint = c.adapter.Endpoint(c.baseURL, c.modelID, isStream)
 	useRawHTTP = useRaw || c.adapter.ForceRawHTTP() || endpoint != ""
 	return body, endpoint, useRawHTTP, nil
+}
+
+// withThinkingDisabled returns a copy of opts with Thinking pinned to false,
+// leaving the caller's options untouched.
+func withThinkingDisabled(opts *ChatOptions) *ChatOptions {
+	off := false
+	var out ChatOptions
+	if opts != nil {
+		out = *opts
+	}
+	out.Thinking = &off
+	return &out
 }
 
 // logRequest 记录请求日志

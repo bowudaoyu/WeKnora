@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
 	ollamaapi "github.com/ollama/ollama/api"
@@ -111,6 +112,10 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 		if len(opts.Tools) > 0 {
 			chatReq.Tools = c.toolFrom(opts.Tools)
 		}
+	}
+	// Qwen 系列一律关闭思考（Ollama 对不支持思考的模型只拒绝 think=true）
+	if provider.IsQwenModel(c.modelName) {
+		chatReq.Think = &ollamaapi.ThinkValue{Value: false}
 	}
 
 	return chatReq

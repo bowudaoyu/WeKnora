@@ -24,7 +24,9 @@ func TestResolveProvider(t *testing.T) {
 		{"deepseek", provider.ProviderDeepSeek, "deepseek-chat", deepseekProvider{}},
 		{"lkeap v3", provider.ProviderLKEAP, "deepseek-v3.1", lkeapProvider{}},
 		{"lkeap r1 falls back", provider.ProviderLKEAP, "deepseek-r1", baseProvider{}},
-		{"qwen thinking", provider.ProviderAliyun, "qwen3-32b", qwenThinkingProvider{}},
+		{"qwen3", provider.ProviderAliyun, "qwen3-32b", qwenProvider{}},
+		{"qwen non-thinking family", provider.ProviderAliyun, "qwen-long", qwenProvider{}},
+		{"aliyun non-qwen falls back", provider.ProviderAliyun, "deepseek-v3", baseProvider{}},
 		{"generic", provider.ProviderGeneric, "anything", genericProvider{}},
 		{"gemini", provider.ProviderGemini, "gemini-3-flash-preview", geminiProvider{}},
 		{"nvidia", provider.ProviderNvidia, "anything", nvidiaProvider{}},
@@ -78,11 +80,23 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 	})
 
 	t.Run("generic legacy chat_template_kwargs", func(t *testing.T) {
-		c := newOutboundChat(t, string(provider.ProviderGeneric), "qwen", nil)
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)
+		c := newOutboundChat(t, string(provider.ProviderGeneric), "llama", nil)
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
 		require.NoError(t, err)
 		require.True(t, useRaw)
-		assert.Contains(t, mustJSON(t, body), "chat_template_kwargs")
+		assert.Contains(t, mustJSON(t, body), `"chat_template_kwargs":{"enable_thinking":true}`)
+	})
+
+	t.Run("generic qwen forces thinking off", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderGeneric), "Qwen/Qwen3-32B", nil)
+		opts := &ChatOptions{Thinking: ptrBool(true)}
+		body, _, useRaw, err := c.buildOutbound(msgs, opts, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"chat_template_kwargs":{"enable_thinking":false}`)
+		assert.NotContains(t, js, "enable_search")
+		assert.True(t, *opts.Thinking, "caller options must not be mutated")
 	})
 
 	t.Run("none keeps the standard SDK request", func(t *testing.T) {
@@ -95,19 +109,27 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 		assert.True(t, ok)
 	})
 
-	t.Run("qwen non-stream forces disabled", func(t *testing.T) {
+	t.Run("qwen always disables thinking and search", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderAliyun), "qwen3-32b", nil)
-		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, false)
-		require.NoError(t, err)
-		require.True(t, useRaw)
-		assert.Contains(t, mustJSON(t, body), `"enable_thinking":false`)
+		for _, isStream := range []bool{true, false} {
+			body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, isStream)
+			require.NoError(t, err)
+			require.True(t, useRaw)
+			js := mustJSON(t, body)
+			assert.Contains(t, js, `"enable_thinking":false`)
+			assert.Contains(t, js, `"enable_search":false`)
+		}
 	})
 
-	t.Run("qwen stream honors requested true", func(t *testing.T) {
-		c := newOutboundChat(t, string(provider.ProviderAliyun), "qwen3-32b", nil)
-		body, _, _, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
+	t.Run("qwen ignores thinking_control override", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderAliyun), "qwen-plus",
+			map[string]string{ExtraConfigThinkingControl: "none"})
+		body, _, useRaw, err := c.buildOutbound(msgs, nil, true)
 		require.NoError(t, err)
-		assert.Contains(t, mustJSON(t, body), `"enable_thinking":true`)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"enable_thinking":false`)
+		assert.Contains(t, js, `"enable_search":false`)
 	})
 
 	t.Run("volcengine thinking enabled", func(t *testing.T) {

@@ -29,7 +29,7 @@ type providerAdapter interface {
 	// Name is the provider this adapter handles.
 	Name() provider.ProviderName
 	// Matches reports whether this adapter applies to the given model name.
-	// Used for sub-provider routing (e.g. Qwen thinking models within Aliyun,
+	// Used for sub-provider routing (e.g. Qwen models within Aliyun,
 	// reasoning models within OpenAI). Default: true.
 	Matches(model string) bool
 	// Thinking is how this provider encodes ChatOptions.Thinking. Default: none.
@@ -119,15 +119,13 @@ func (weKnoraCloudProvider) TransformMessages(messages []openai.ChatCompletionMe
 	return result
 }
 
-// --- Aliyun Qwen thinking models: enable_thinking (always sent, forced off non-stream) ---
+// --- Aliyun Qwen: enable_thinking / enable_search always sent as false ---
 
-type qwenThinkingProvider struct{ baseProvider }
+type qwenProvider struct{ baseProvider }
 
-func (qwenThinkingProvider) Name() provider.ProviderName { return provider.ProviderAliyun }
-func (qwenThinkingProvider) Matches(model string) bool   { return provider.IsQwenThinkingModel(model) }
-func (qwenThinkingProvider) Thinking() ThinkingStrategy {
-	return enableThinking{alwaysSend: true, disableOnNonStream: true}
-}
+func (qwenProvider) Name() provider.ProviderName { return provider.ProviderAliyun }
+func (qwenProvider) Matches(model string) bool   { return provider.IsQwenModel(model) }
+func (qwenProvider) Thinking() ThinkingStrategy  { return qwenNoThinking{} }
 
 // --- LKEAP: thinking via { "thinking": { "type": ... } }, only for DeepSeek V3.x ---
 // R1 series enables chain-of-thought by default and is left untouched (falls
@@ -269,7 +267,7 @@ func shapeOpenAIReasoning(req *openai.ChatCompletionRequest) {
 // Matches predicate) must precede the generic catch-all for the same provider.
 var providerRegistry = []providerAdapter{
 	weKnoraCloudProvider{},
-	qwenThinkingProvider{},
+	qwenProvider{},
 	lkeapProvider{},
 	deepseekProvider{},
 	genericProvider{},

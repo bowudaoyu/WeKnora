@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	ollamaapi "github.com/ollama/ollama/api"
 )
@@ -49,6 +50,10 @@ func (v *OllamaVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt s
 		},
 		Stream:  &streamFlag,
 		Options: map[string]interface{}{"temperature": 0.1},
+	}
+	// Qwen 系列一律关闭思考
+	if provider.IsQwenModel(v.modelName) {
+		chatReq.Think = &ollamaapi.ThinkValue{Value: false}
 	}
 
 	totalImageSize := 0

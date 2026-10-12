@@ -17,7 +17,7 @@ func TestThinkingStrategy_NilThinking(t *testing.T) {
 	req := openai.ChatCompletionRequest{Model: "test"}
 	strategies := []ThinkingStrategy{
 		noThinking{},
-		enableThinking{}, // not alwaysSend
+		enableThinking{},
 		thinkingTypeField{},
 		chatTemplateKwargs{},
 	}
@@ -28,36 +28,29 @@ func TestThinkingStrategy_NilThinking(t *testing.T) {
 	}
 }
 
-// TestEnableThinking_QwenSemantics pins the Aliyun Qwen behavior: thinking is
-// always sent, defaults to false, and is forced off on non-stream requests.
-func TestEnableThinking_QwenSemantics(t *testing.T) {
-	s := enableThinking{alwaysSend: true, disableOnNonStream: true}
+// TestQwenNoThinking pins the Aliyun Qwen behavior: enable_thinking and
+// enable_search are always sent as false, whatever the caller requested.
+func TestQwenNoThinking(t *testing.T) {
+	s := qwenNoThinking{}
 	req := openai.ChatCompletionRequest{Model: "qwen3-32b"}
 
-	t.Run("non-stream forces false even when requested true", func(t *testing.T) {
-		custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, false)
-		require.True(t, raw)
-		qwen, ok := custom.(QwenChatCompletionRequest)
-		require.True(t, ok)
-		require.NotNil(t, qwen.EnableThinking)
-		assert.False(t, *qwen.EnableThinking)
-	})
+	for _, opts := range []*ChatOptions{nil, {Thinking: ptrBool(true)}, {Thinking: ptrBool(false)}} {
+		for _, isStream := range []bool{true, false} {
+			custom, raw := s.Apply(&req, opts, isStream)
+			require.True(t, raw)
+			qwen, ok := custom.(QwenChatCompletionRequest)
+			require.True(t, ok)
+			require.NotNil(t, qwen.EnableThinking)
+			assert.False(t, *qwen.EnableThinking)
+			require.NotNil(t, qwen.EnableSearch)
+			assert.False(t, *qwen.EnableSearch)
 
-	t.Run("stream honors requested true", func(t *testing.T) {
-		custom, raw := s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, true)
-		require.True(t, raw)
-		qwen := custom.(QwenChatCompletionRequest)
-		require.NotNil(t, qwen.EnableThinking)
-		assert.True(t, *qwen.EnableThinking)
-	})
-
-	t.Run("stream defaults to false when unset", func(t *testing.T) {
-		custom, raw := s.Apply(&req, nil, true)
-		require.True(t, raw)
-		qwen := custom.(QwenChatCompletionRequest)
-		require.NotNil(t, qwen.EnableThinking)
-		assert.False(t, *qwen.EnableThinking)
-	})
+			body, err := json.Marshal(custom)
+			require.NoError(t, err)
+			assert.Contains(t, string(body), `"enable_thinking":false`)
+			assert.Contains(t, string(body), `"enable_search":false`)
+		}
+	}
 }
 
 // TestEnableThinking_ExtraConfigSemantics pins the extra_config "enable_thinking"

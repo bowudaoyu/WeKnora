@@ -54,14 +54,11 @@ func (p *AliyunProvider) ValidateConfig(config *Config) error {
 	return nil
 }
 
-// IsQwenThinkingModel 检查模型名是否为支持思维链的 Qwen 模型
-// 支持思维链的模型需要特殊处理 enable_thinking 参数
-func IsQwenThinkingModel(modelName string) bool {
+// IsQwenModel 检查模型名是否属于 Qwen 系列（含 QwQ、Qwen-VL 等）。
+// 这些模型的调用一律强制关闭思考（enable_thinking）与联网搜索（enable_search）。
+func IsQwenModel(modelName string) bool {
 	lowerName := strings.ToLower(modelName)
-	return strings.HasPrefix(lowerName, "qwen3") ||
-		strings.HasPrefix(lowerName, "qwen-plus") ||
-		strings.HasPrefix(lowerName, "qwen-max") ||
-		strings.HasPrefix(lowerName, "qwen-turbo")
+	return strings.Contains(lowerName, "qwen") || strings.Contains(lowerName, "qwq")
 }
 
 // IsQwen3Model checks whether the model belongs to the Qwen3 family only.

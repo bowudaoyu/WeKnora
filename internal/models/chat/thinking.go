@@ -17,10 +17,12 @@ const ExtraConfigThinkingControl = "thinking_control"
 // through a non-standard top-level field. They embed the standard OpenAI
 // request so all other fields are marshalled unchanged.
 
-// QwenChatCompletionRequest adds Aliyun Qwen's `enable_thinking` boolean.
+// QwenChatCompletionRequest adds Aliyun Qwen's `enable_thinking` and
+// `enable_search` booleans.
 type QwenChatCompletionRequest struct {
 	openai.ChatCompletionRequest
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
+	EnableSearch   *bool `json:"enable_search,omitempty"`
 }
 
 // ThinkingConfig is the `{ "type": "enabled"|"disabled" }` block used by
@@ -44,8 +46,8 @@ type ThinkingChatCompletionRequest struct {
 //     carries fields the OpenAI SDK would strip.
 //
 // When opts.Thinking is nil most strategies emit nothing, deferring to the
-// model's own default; the exception is enableThinking{alwaysSend: true}
-// (Aliyun Qwen), which must always pin the field.
+// model's own default; the exception is qwenNoThinking (Aliyun Qwen), which
+// always pins thinking and search off.
 type ThinkingStrategy interface {
 	Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (customBody any, useRawHTTP bool)
 }
@@ -57,30 +59,29 @@ func (noThinking) Apply(*openai.ChatCompletionRequest, *ChatOptions, bool) (any,
 	return nil, false
 }
 
-// enableThinking encodes thinking via Qwen's `enable_thinking` boolean.
-//
-//   - alwaysSend: pin the field even when opts.Thinking is nil (Aliyun Qwen
-//     thinking models require it on every request; default value is false).
-//   - disableOnNonStream: force enable_thinking=false for non-stream requests
-//     (Qwen3 rejects thinking in non-stream mode).
-type enableThinking struct {
-	alwaysSend         bool
-	disableOnNonStream bool
-}
+// enableThinking encodes thinking via the top-level `enable_thinking` boolean
+// (extra_config override). Emits nothing when opts.Thinking is unset.
+type enableThinking struct{}
 
-func (s enableThinking) Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (any, bool) {
-	thinking := false
-	switch {
-	case opts != nil && opts.Thinking != nil:
-		thinking = *opts.Thinking
-	case !s.alwaysSend:
+func (enableThinking) Apply(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) (any, bool) {
+	if opts == nil || opts.Thinking == nil {
 		return nil, false
 	}
-	if s.disableOnNonStream && !isStream {
-		thinking = false
-	}
 	qwenReq := QwenChatCompletionRequest{ChatCompletionRequest: *req}
-	qwenReq.EnableThinking = &thinking
+	qwenReq.EnableThinking = opts.Thinking
+	return qwenReq, true
+}
+
+// qwenNoThinking pins Aliyun DashScope Qwen requests to enable_thinking=false
+// and enable_search=false on every call, ignoring opts.Thinking: 项目约定所有
+// Qwen 调用一律关闭思考与联网搜索。
+type qwenNoThinking struct{}
+
+func (qwenNoThinking) Apply(req *openai.ChatCompletionRequest, _ *ChatOptions, _ bool) (any, bool) {
+	off := false
+	qwenReq := QwenChatCompletionRequest{ChatCompletionRequest: *req}
+	qwenReq.EnableThinking = &off
+	qwenReq.EnableSearch = &off
 	return qwenReq, true
 }
 

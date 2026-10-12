@@ -151,6 +151,14 @@ func TestAliyunModelDetection(t *testing.T) {
 		assert.False(t, IsQwen3Model("qwen2.5-72b"))
 	})
 
+	t.Run("Qwen model detection", func(t *testing.T) {
+		assert.True(t, IsQwenModel("qwen-plus"))
+		assert.True(t, IsQwenModel("Qwen/Qwen3-32B"))
+		assert.True(t, IsQwenModel("qwen-vl-max"))
+		assert.True(t, IsQwenModel("qwq-plus"))
+		assert.False(t, IsQwenModel("deepseek-chat"))
+	})
+
 	t.Run("DeepSeek model detection", func(t *testing.T) {
 		assert.True(t, IsDeepSeekModel("deepseek-chat"))
 		assert.True(t, IsDeepSeekModel("deepseek-v3.1"))

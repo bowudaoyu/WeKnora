@@ -1,9 +1,12 @@
 package vlm
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -46,6 +49,9 @@ type RemoteAPIVLM struct {
 	baseURL     string
 	maxTokens   int
 	temperature float32
+	// 自部署 Qwen（vLLM / llama.cpp 等）默认开思考，通过
+	// chat_template_kwargs.enable_thinking=false 关闭。
+	templateNoThinking bool
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
@@ -75,6 +81,9 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 		}
 	}
 	httpClient := &http.Client{Timeout: vlmHTTPTimeout()}
+	if providerName == provider.ProviderAliyun && provider.IsQwenModel(config.ModelName) {
+		httpClient.Transport = qwenNoThinkingTransport{base: http.DefaultTransport}
+	}
 
 	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
 	if len(config.CustomHeaders) > 0 {
@@ -99,6 +108,8 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 		baseURL:     config.BaseURL,
 		maxTokens:   maxToks,
 		temperature: temp,
+		templateNoThinking: (providerName == provider.ProviderGeneric || providerName == provider.ProviderNvidia) &&
+			provider.IsQwenModel(config.ModelName),
 	}, nil
 }
 
@@ -139,6 +150,9 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		MaxTokens:   v.maxTokens,
 		Temperature: v.temperature,
 	}
+	if v.templateNoThinking {
+		req.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+	}
 
 	totalImageSize := 0
 	for _, img := range imgBytesList {
@@ -162,6 +176,34 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 
 func (v *RemoteAPIVLM) GetModelName() string { return v.modelName }
 func (v *RemoteAPIVLM) GetModelID() string   { return v.modelID }
+
+// qwenNoThinkingTransport 给 DashScope Qwen-VL 请求体补上 enable_thinking=false 与
+// enable_search=false（go-openai 的请求结构体没有这两个字段，SDK 会直接丢弃）。
+type qwenNoThinkingTransport struct{ base http.RoundTripper }
+
+func (t qwenNoThinkingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method != http.MethodPost || req.Body == nil {
+		return t.base.RoundTrip(req)
+	}
+	raw, err := io.ReadAll(req.Body)
+	req.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &body); err == nil {
+		body["enable_thinking"] = json.RawMessage("false")
+		body["enable_search"] = json.RawMessage("false")
+		if patched, err := json.Marshal(body); err == nil {
+			raw = patched
+		}
+	}
+	out := req.Clone(req.Context())
+	out.Body = io.NopCloser(bytes.NewReader(raw))
+	out.ContentLength = int64(len(raw))
+	out.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
+	return t.base.RoundTrip(out)
+}
 
 // detectImageMIME returns the MIME type for the given image bytes.
 func detectImageMIME(data []byte) string {
